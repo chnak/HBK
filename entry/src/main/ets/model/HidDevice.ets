@@ -317,6 +317,7 @@ export class HidDevice {
 
     hilog.info(DOMAIN, TAG, 'bluetooth state %{public}d, %{public}d paired device(s)',
       bluetoothManager.getState(), paired.length);
+    hilog.info(DOMAIN, TAG, 'this phone is called %{public}s', connection.getLocalName());
 
     for (let i = 0; i < paired.length; i++) {
       const address: string = paired[i];
@@ -326,7 +327,8 @@ export class HidDevice {
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'no name for %{public}s', address);
       }
-      hilog.info(DOMAIN, TAG, 'paired [%{public}s] %{public}s', address, name);
+      hilog.info(DOMAIN, TAG, 'paired [%{public}s] %{public}s bond %{public}d',
+        address, name, connection.getPairState(address));
       out.push({ address: address, name: name, isComputer: this.isComputer(address), paired: true });
     }
     return out;
