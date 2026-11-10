@@ -63,27 +63,57 @@ Bluetooth HID Device，PC 扮演 HID Host，键盘和触控板的输入都转成
 
 ## 签名与安装
 
-自动签名要靠 DevEco 的「自动签名」功能，它需要华为账号：
-
-1. 用 DevEco Studio 打开本工程
-2. `File → Project Structure → Signing Configs`，勾选 **Automatically generate signature**
-3. 连上手机，`Run` 即可
-
-勾过之后，`build-profile.json5` 里会有 `signingConfigs`，`build.ps1` 产出的就是
-签好名的 hap，可以直接用 `hdc install` 装。
-
-命令行安装：
+一条命令：编译 → 签名 → 安装 → 启动。
 
 ```powershell
-hdc install entry\build\default\outputs\default\entry-default-signed.hap
+.\install.ps1                       # 默认设备 192.168.50.22:37793
+.\install.ps1 -Device 192.168.1.50:5555
 ```
+
+签名用的是华为云签发的调试证书（`hap_installer` 已经存了一份）：
+
+| 文件 | 说明 |
+|---|---|
+| `xiaobai.p12` | 私钥，alias `xiaobai`，密码 `xiaobai123`，EC P-256 |
+| `auto_debug_<id>.cer.cer` | 应用证书 |
+| `dev_hackeris_hish_desktop.p7b` | profile，里面有这台手机的 UDID |
+
+> ⚠️ **profile 和包名是绑死的**：`AppScope\app.json5` 里的 `bundleName`
+> 必须和 profile 里的 `bundle-name` 一致，否则安装报 `verify signature failed`。
+> 想用自己的包名，就要在 DevEco 里重新配一次自动签名。
+
+也可以走 DevEco 的「自动签名」：用 DevEco Studio 打开本工程 →
+`Project Structure → Signing Configs` → 勾 **Automatically generate signature**，
+之后 `build.ps1` 出来的就是签好名的 hap。
 
 ## 配对
 
-手机和 PC 先在系统蓝牙里配对。应用会从已配对列表里找名字像电脑的设备
-（PC / Desktop / Laptop / MacBook / Surface / ThinkPad），然后由手机主动去连
-PC 的 HID 服务 —— 方向和 BB10 上一样，**必须由手机发起连接**，否则 PC 那边不会
-出现键盘。
+手机和 PC 先在系统蓝牙里配对。应用会从已配对列表里找设备，然后：
+
+1. 用蓝牙 **COD 大类**判断哪些是电脑（`MajorClass.MAJOR_COMPUTER`），
+   比认名字可靠 —— 电脑的名字可以是任何东西
+2. 扫一次蓝牙，拿到电脑**当前**广播的地址。Windows 会轮换自己的地址，
+   配对列表里存的那份会失效，连接请求就会寻呼超时
+3. 由手机主动连 PC 的 HID 服务 —— 方向和 BB10 上一样，**必须由手机发起**，
+   否则 PC 那边不会出现键盘
+
+扫描到但还没配对的电脑，列表里会标成「电脑·未配对」，点一下先配对再连。
+
+## 已知问题
+
+**手机连不上 PC 时怎么查**：手机侧日志会出现
+
+```
+btm_acl_paging: bda:3a:76:...:f9
+l2c_link_hci_conn_comp: ... connection fail 4
+```
+
+`connection fail 4` 是 HCI 的**寻呼超时**：PC 没有回应连接请求。检查方向：
+
+- PC 的蓝牙地址：`Get-NetAdapter` 里那个 PAN 网卡的 MAC
+- 手机配对列表里的地址：`hilog` 里 `HBK: paired [xx:xx:...] <名字>`
+- 让 PC 可被发现再试（否则手机扫不到它）：
+  `BluetoothEnableDiscovery(NULL, 300, TRUE)`（`bthprops.cpl`）
 
 ## 代码结构
 
