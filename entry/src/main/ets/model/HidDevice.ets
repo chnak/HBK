@@ -9,7 +9,7 @@
  * The whole thing only works while the app is in the foreground: the system
  * cancels the registration as soon as the app goes to the background.
  */
-import { common, connection, hid } from '@kit.ConnectivityKit';
+import { bluetoothManager, common, connection, constant, hid } from '@kit.ConnectivityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -23,6 +23,15 @@ const MOD_CTRL: number = 0x01;
 const MOD_SHIFT: number = 0x02;
 const MOD_ALT: number = 0x04;
 const MOD_GUI: number = 0x08;
+
+/** One paired Bluetooth device. */
+export interface PeerInfo {
+  address: string;
+  name: string;
+  /** True when the device announces itself as a computer - this is the
+   *  Bluetooth class of device, which is far more reliable than the name. */
+  isComputer: boolean;
+}
 
 export class HidDevice {
   private profile: hid.HidDeviceProfile | null = null;
@@ -42,6 +51,10 @@ export class HidDevice {
 
   /** LED state reported by the host: bit 0 num lock, bit 1 caps lock. */
   private leds: number = 0;
+  /** How often the last report has been repeated while the link was down. */
+  private retries: number = 0;
+  /** True once the host has accepted a report. */
+  private linkUp: boolean = false;
 
   isRegistered(): boolean {
     return this.registered;
@@ -49,6 +62,11 @@ export class HidDevice {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /** True once the host has accepted a report, so the link is really up. */
+  isLinkUp(): boolean {
+    return this.linkUp;
   }
 
   peerName(): string {
@@ -62,11 +80,14 @@ export class HidDevice {
   /**
    * Register the HID device service.  The app has to be in the foreground,
    * and no other app may have registered a HID device already.
+   *
+   * The system cancels the registration when the app leaves the foreground,
+   * so this has to be called again every time the app comes back.
    */
   async register(): Promise<boolean> {
-    if (this.registered) {
-      return true;
-    }
+    // Drop whatever we think we still hold: after a trip to the background
+    // the system has cancelled it, and registering twice is refused.
+    this.unregister();
 
     const profile: hid.HidDeviceProfile = hid.createHidDeviceProfile();
     this.profile = profile;
@@ -98,16 +119,18 @@ export class HidDevice {
 
   /** Give the registration back to the system. */
   unregister(): void {
-    if (!this.profile || !this.registered) {
+    if (!this.profile) {
       return;
     }
     try {
       this.profile.unregisterHidDevice();
     } catch (e) {
-      hilog.error(DOMAIN, TAG, 'unregister failed: %{public}s', (e as BusinessError).message);
+      // The system already dropped it when the app went to the background.
+      hilog.info(DOMAIN, TAG, 'unregister: %{public}s', (e as BusinessError).message);
     }
     this.registered = false;
     this.connected = false;
+    this.linkUp = false;
     this.held = [];
     this.latched = 0;
     this.temporary = 0;
@@ -120,17 +143,159 @@ export class HidDevice {
    * sees a keyboard.
    */
   async connectToHost(): Promise<boolean> {
-    if (!this.profile || !this.registered) {
-      return false;
-    }
-
-    const peers: string[] = this.findHosts();
-    if (peers.length === 0) {
+    const peers: PeerInfo[] = this.listPeers();
+    const pc: PeerInfo | undefined = this.pickHost(peers);
+    if (!pc) {
       hilog.info(DOMAIN, TAG, 'no paired host found');
       return false;
     }
 
-    const address: string = peers[0];
+    // The address in the paired list is the private address the peer had
+    // when it was paired.  Windows rotates that address, so the entry
+    // goes stale and the connection request times out.  Scanning finds the
+    // address the computer is using right now.
+    const live: string = await this.scanForHost(pc.name, 8000);
+    if (live.length > 0 && live !== pc.address) {
+      hilog.info(DOMAIN, TAG, 'live address of %{public}s is %{public}s', pc.name, live);
+      return this.connectTo(live);
+    }
+    return this.connectTo(pc.address);
+  }
+
+  /**
+   * Look for the computer in the Bluetooth scan and return the address it
+   * is advertising right now.  An empty string means it was not found.
+   */
+  scanForHost(name: string, timeoutMs: number): Promise<string> {
+    return new Promise<string>((resolve) => {
+      let done: boolean = false;
+      const finish = (address: string) => {
+        if (done) {
+          return;
+        }
+        done = true;
+        try {
+          connection.stopBluetoothDiscovery();
+          connection.off('discoveryResult', onFound);
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'stop scan failed: %{public}s', (e as BusinessError).message);
+        }
+        resolve(address);
+      };
+
+      const onFound = (results: Array<connection.DiscoveryResult>) => {
+        for (const r of results) {
+          const isComputer: boolean = r.deviceClass
+            && r.deviceClass.majorClass === constant.MajorClass.MAJOR_COMPUTER;
+          hilog.info(DOMAIN, TAG, 'found %{public}s %{public}s computer %{public}s',
+            r.deviceId, r.deviceName, isComputer ? 'yes' : 'no');
+          if (name.length > 0 && r.deviceName === name) {
+            finish(r.deviceId);
+            return;
+          }
+          if (isComputer) {
+            finish(r.deviceId);
+            return;
+          }
+        }
+      };
+
+      try {
+        connection.on('discoveryResult', onFound);
+        connection.startBluetoothDiscovery();
+      } catch (e) {
+        hilog.error(DOMAIN, TAG, 'scan failed: %{public}s', (e as BusinessError).message);
+        finish('');
+        return;
+      }
+      setTimeout(() => {
+        finish('');
+      }, timeoutMs);
+    });
+  }
+
+  /** Every device the phone is paired with. */
+  listPeers(): PeerInfo[] {
+    const out: PeerInfo[] = [];
+    let paired: Array<string> = [];
+    try {
+      paired = connection.getPairedDevices();
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'getPairedDevices failed: %{public}s', (e as BusinessError).message);
+      return out;
+    }
+
+    hilog.info(DOMAIN, TAG, 'bluetooth state %{public}d, %{public}d paired device(s)',
+      bluetoothManager.getState(), paired.length);
+
+    for (let i = 0; i < paired.length; i++) {
+      const address: string = paired[i];
+      let name: string = '';
+      try {
+        name = connection.getRemoteDeviceName(address);
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'no name for %{public}s', address);
+      }
+      hilog.info(DOMAIN, TAG, 'paired [%{public}s] %{public}s', address, name);
+      out.push({ address: address, name: name, isComputer: this.isComputer(address) });
+    }
+    return out;
+  }
+
+  /**
+   * The Bluetooth class of device says what a device is.  A computer
+   * announces MAJOR_COMPUTER, a speaker or a headset MAJOR_AUDIO_VIDEO and
+   * a phone MAJOR_PHONE - which is a lot more reliable than the name.
+   */
+  private isComputer(address: string): boolean {
+    try {
+      const cls = connection.getRemoteDeviceClass(address);
+      const isPc: boolean = cls.majorClass === constant.MajorClass.MAJOR_COMPUTER;
+      hilog.info(DOMAIN, TAG, 'device %{public}s major class %{public}d -> computer %{public}s',
+        address, cls.majorClass, isPc ? 'yes' : 'no');
+      return isPc;
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'getRemoteDeviceClass failed for %{public}s', address);
+      return false;
+    }
+  }
+
+  /** The paired device that looks most like a computer. */
+  pickHost(peers: PeerInfo[]): PeerInfo | undefined {
+    // The class of device comes first, the name is only a fallback.
+    for (const p of peers) {
+      if (p.isComputer) {
+        return p;
+      }
+    }
+    for (const p of peers) {
+      if (this.looksLikePc(p.name)) {
+        return p;
+      }
+    }
+    return undefined;
+  }
+
+  private looksLikePc(name: string): boolean {
+    const lower: string = name.toLowerCase();
+    return lower.indexOf('pc') >= 0
+      || lower.indexOf('desktop') >= 0
+      || lower.indexOf('laptop') >= 0
+      || lower.indexOf('macbook') >= 0
+      || lower.indexOf('surface') >= 0
+      || lower.indexOf('thinkpad') >= 0
+      || lower.indexOf('computer') >= 0
+      || lower.indexOf('工作站') >= 0
+      // Windows names the machine after the computer name: WIN-XXXX, DESKTOP-XXXX
+      || lower.startsWith('win-')
+      || lower.startsWith('win_');
+  }
+
+  /** Open the HID channel to one specific device. */
+  connectTo(address: string): boolean {
+    if (!this.profile || !this.registered) {
+      return false;
+    }
     const target: common.BluetoothAddress = {
       address: address,
       addressType: common.BluetoothAddressType.REAL
@@ -143,6 +308,10 @@ export class HidDevice {
       this.peer = connection.getRemoteDeviceName(address);
       hilog.info(DOMAIN, TAG, 'connecting to %{public}s (%{public}s)',
         this.peer, address);
+      // An empty keyboard report kicks the connection: it is repeated
+      // until the host answers, which is also how we learn that the
+      // link is really up.
+      this.sendKeyboard();
       return true;
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'connect failed: %{public}s', (e as BusinessError).message);
@@ -151,41 +320,20 @@ export class HidDevice {
   }
 
   /**
-   * The paired devices that could be a PC.  A keyboard or a mouse shows up
-   * as a HID device of its own, so those are skipped.
+   * Pair with a device that is not paired yet.  A computer that is not in
+   * the paired list can still be used: it has to show up in a scan first.
    */
-  private findHosts(): string[] {
-    const out: string[] = [];
-    let paired: Array<string> = [];
-    try {
-      paired = connection.getPairedDevices();
-    } catch (e) {
-      hilog.error(DOMAIN, TAG, 'getPairedDevices failed: %{public}s', (e as BusinessError).message);
-      return out;
-    }
-
-    for (let i = 0; i < paired.length; i++) {
-      const address: string = paired[i];
-      let name: string = '';
+  async pairWith(address: string): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
       try {
-        name = connection.getRemoteDeviceName(address);
+        connection.pairDevice(address);
+        hilog.info(DOMAIN, TAG, 'pairing with %{public}s', address);
+        resolve(true);
       } catch (e) {
-        hilog.warn(DOMAIN, TAG, 'no name for %{public}s', address);
+        hilog.error(DOMAIN, TAG, 'pairDevice failed: %{public}s', (e as BusinessError).message);
+        resolve(false);
       }
-      const lower: string = name.toLowerCase();
-      // "PC", "Desktop", "Laptop", "Surface", "ThinkPad", "MacBook" ...
-      const looksLikePc: boolean = lower.indexOf('pc') >= 0
-        || lower.indexOf('desktop') >= 0
-        || lower.indexOf('laptop') >= 0
-        || lower.indexOf('macbook') >= 0
-        || lower.indexOf('surface') >= 0
-        || lower.indexOf('thinkpad') >= 0
-        || lower.indexOf('computer') >= 0;
-      if (looksLikePc) {
-        out.push(address);
-      }
-    }
-    return out;
+    });
   }
 
   /** Listen for the host's LED report and for the cable being unplugged. */
@@ -255,7 +403,7 @@ export class HidDevice {
   }
 
   private sendKeyboard(): void {
-    if (!this.profile || !this.connected) {
+    if (!this.profile || !this.registered) {
       return;
     }
     const report: number[] = [this.latched | this.temporary, 0, 0, 0, 0, 0, 0, 0];
@@ -305,7 +453,7 @@ export class HidDevice {
   }
 
   private sendMouse(buttons: number, dx: number, dy: number, wheel: number, pan: number): void {
-    if (!this.profile || !this.connected) {
+    if (!this.profile || !this.registered) {
       return;
     }
     const report: number[] = [
@@ -339,12 +487,35 @@ export class HidDevice {
     }
     try {
       this.profile.sendReport(reportId, new Uint8Array(bytes));
+      if (!this.linkUp) {
+        this.linkUp = true;
+        hilog.info(DOMAIN, TAG, 'link is up');
+      }
+      this.retries = 0;
     } catch (e) {
-      // The link can be down even though connect() did not complain.
-      this.connected = false;
+      const err = e as BusinessError;
+      // 2903053: the link is not up yet.  The profile connects in the
+      // background, so the first reports have to be repeated.
+      if (err.code === 2903053) {
+        this.linkUp = false;
+        this.retry(reportId, bytes);
+        return;
+      }
       hilog.error(DOMAIN, TAG, 'sendReport %{public}d failed: %{public}s',
-        reportId, (e as BusinessError).message);
+        reportId, err.message);
     }
+  }
+
+  /** Repeat a report until the link is up. */
+  private retry(reportId: number, bytes: number[]): void {
+    if (this.retries >= 20) {
+      hilog.error(DOMAIN, TAG, 'link never came up');
+      return;
+    }
+    ++this.retries;
+    setTimeout(() => {
+      this.send(reportId, bytes);
+    }, 300);
   }
 }
 

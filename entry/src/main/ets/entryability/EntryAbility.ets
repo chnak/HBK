@@ -19,6 +19,29 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, 'content loaded');
+      this.goFullScreen(windowStage);
+    });
+  }
+
+  /**
+   * The app is a keyboard and a mouse: every pixel of the screen belongs
+   * to them, so the status bar and the navigation bar are hidden and the
+   * layout goes all the way to the edges.
+   */
+  private goFullScreen(windowStage: window.WindowStage): void {
+    windowStage.getMainWindow().then((mainWindow: window.Window) => {
+      mainWindow.setWindowLayoutFullScreen(true).then(() => {
+        hilog.info(DOMAIN, TAG, 'full screen layout');
+      }).catch(() => {
+        hilog.error(DOMAIN, TAG, 'setWindowLayoutFullScreen failed');
+      });
+      mainWindow.setWindowSystemBarEnable([]).then(() => {
+        hilog.info(DOMAIN, TAG, 'system bars hidden');
+      }).catch(() => {
+        hilog.error(DOMAIN, TAG, 'setWindowSystemBarEnable failed');
+      });
+    }).catch(() => {
+      hilog.error(DOMAIN, TAG, 'getMainWindow failed');
     });
   }
 
