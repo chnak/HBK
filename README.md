@@ -8,11 +8,11 @@ Bluetooth HID Device，PC 扮演 HID Host，键盘和触控板的输入都转成
 
 ## 界面
 
-横屏，三栏：
+横屏全屏，三栏：
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ ● 已连接：DESKTOP-XXX            │        电量  重连          │
+│ ● 已连接：DESKTOP-XXX                              重连          │
 ├──────────────┬───────────────────────────┬─────────────────────┤
 │ Esc ` 1 2 3  │                           │ 7 8 9 0 - = ⌫        │
 │ Tab q w e r  │                           │ y u i o p [ ]        │
@@ -20,13 +20,22 @@ Bluetooth HID Device，PC 扮演 HID Host，键盘和触控板的输入都转成
 │ Shift z x c  │                           │ n m , . / ↑          │
 │ Ctrl Win Alt │                           │ Space Alt ← ↓ →      │
 ├──────────────┴───────────────────────────┴─────────────────────┤
-│ 🔊+ 🔉- 🔇 ⏯ ⏭ ⏮   F5 F11 F12                              │
+│ 🔊+ 🔉- 🔇 ⏯ ⏭ ⏮ F5 F12                                     │
+├───────────────────────────────────────────────────────────────┤
+│ 复制 粘贴 剪切 全选 撤销 切换 任务 锁屏          找鼠标        │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 键盘从标准 QWERTY 的正中间劈开：左手那一半在左，右手那一半在右，中间空出来当
 鼠标区。修饰键（Ctrl / Win / Alt / Shift）是**锁定式**的 —— 点一下按下，再点一下
 松开，按住 Shift 时字母键会变成大写。
+
+底部两排是常用的：
+
+- 媒体键（音量、播放）和 F5 / F12
+- 快捷键：复制 Ctrl+C、粘贴 Ctrl+V、剪切 Ctrl+X、全选 Ctrl+A、撤销 Ctrl+Z、
+  切换 Alt+Tab、任务管理器 Ctrl+Shift+Esc、锁屏 Win+L
+- 「找鼠标」：让指针抖一圈，大屏上找不到时用
 
 ## 手势
 
@@ -119,16 +128,17 @@ l2c_link_hci_conn_comp: ... connection fail 4
 
 ```
 entry/src/main/ets/
-├── entryability/EntryAbility.ets   应用入口，前后台切换时释放按键
+├── entryability/EntryAbility.ets   应用入口，全屏、前后台切换时释放按键
 ├── pages/Index.ets                 横屏三栏布局
 ├── components/
-│   ├── KeyRow.ets                  一行按键和单个按键（锁定式修饰键）
+│   ├── KeyRow.ets                  一行按键和单个按键（锁定式修饰键、快捷键）
 │   └── TouchPad.ets                鼠标区与手势识别
 └── model/
     ├── HidDescriptor.ets           HID report descriptor
     ├── HidDevice.ets               HID 从机：注册、连接、发报告
     ├── Keymap.ets                  键位表（HID usage code）
     └── Global.ets                  全局唯一的 HID 实例
+tools/bt-host.ps1                   PC 侧：让电脑可被发现、允许手机连进来
 ```
 
 ## 已知限制
