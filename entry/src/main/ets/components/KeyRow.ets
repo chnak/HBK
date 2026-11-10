@@ -34,7 +34,7 @@ export struct KeyRow {
 @Component
 export struct KeyCap {
   def: KeyDef = {
-    label: '', usage: 0, shifted: '', wide: 1, latch: false, consumer: false
+    label: '', usage: 0, shifted: '', wide: 1, latch: false, consumer: false, mods: 0
   };
   @Link shifted: boolean;
 
@@ -82,6 +82,12 @@ export struct KeyCap {
 
     if (d.consumer) {
       hidDevice.sendConsumer(d.usage);
+      return;
+    }
+
+    if (d.mods !== 0) {
+      // A shortcut: the modifiers are held while the key is pressed.
+      hidDevice.sendChord(d.mods, d.usage);
       return;
     }
 

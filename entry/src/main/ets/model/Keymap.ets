@@ -37,6 +37,14 @@ export const CONS_STOP: number = 0xB7;
 export const CONS_NEXT: number = 0xB5;
 export const CONS_PREV: number = 0xB8;
 
+/** HID usage codes used by the shortcuts. */
+export const KEY_C: number = 0x06;
+export const KEY_V: number = 0x19;
+export const KEY_X: number = 0x1B;
+export const KEY_A: number = 0x04;
+export const KEY_Z: number = 0x1A;
+export const KEY_L: number = 0x0E;
+
 export interface KeyDef {
   /** What is printed on the key. */
   label: string;
@@ -51,26 +59,36 @@ export interface KeyDef {
   /** True when the usage belongs to the consumer page instead of the
    *  keyboard page - those go into report 3, not report 1. */
   consumer: boolean;
+  /** Modifier bits that are held while the key is pressed (a shortcut). */
+  mods: number;
 }
 
 function key(label: string, usage: number, shifted: string = '', wide: number = 1): KeyDef {
   return {
     label: label, usage: usage, shifted: shifted,
-    wide: wide, latch: false, consumer: false
+    wide: wide, latch: false, consumer: false, mods: 0
   };
 }
 
 function mod(label: string, usage: number, wide: number = 1): KeyDef {
   return {
     label: label, usage: usage, shifted: '',
-    wide: wide, latch: true, consumer: false
+    wide: wide, latch: true, consumer: false, mods: 0
   };
 }
 
 function cons(label: string, usage: number): KeyDef {
   return {
     label: label, usage: usage, shifted: '',
-    wide: 1, latch: false, consumer: true
+    wide: 1, latch: false, consumer: true, mods: 0
+  };
+}
+
+/** A shortcut: a modifier held while one key is pressed. */
+function chord(label: string, mods: number, usage: number): KeyDef {
+  return {
+    label: label, usage: usage, shifted: '',
+    wide: 1, latch: false, consumer: false, mods: mods
   };
 }
 
@@ -142,7 +160,23 @@ export function extraKeys(): KeyDef[] {
     cons('⏭', CONS_NEXT),
     cons('⏮', CONS_PREV),
     key('F5', 0x3F),
-    key('F11', 0x44),
     key('F12', 0x45)
+  ];
+}
+
+/**
+ * The shortcuts that are needed all the time: the editing keys, switching
+ * windows and locking the screen.
+ */
+export function shortcutKeys(): KeyDef[] {
+  return [
+    chord('复制', MOD_CTRL, KEY_C),
+    chord('粘贴', MOD_CTRL, KEY_V),
+    chord('剪切', MOD_CTRL, KEY_X),
+    chord('全选', MOD_CTRL, KEY_A),
+    chord('撤销', MOD_CTRL | MOD_SHIFT, KEY_Z),
+    chord('切换', MOD_ALT, KEY_TAB),
+    chord('任务', MOD_CTRL | MOD_SHIFT, KEY_ESC),
+    chord('锁屏', MOD_GUI, KEY_L)
   ];
 }

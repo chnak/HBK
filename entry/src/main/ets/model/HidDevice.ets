@@ -419,6 +419,34 @@ export class HidDevice {
   }
 
   /**
+   * Send one key with modifiers held down, the way a shortcut key works:
+   * the modifiers go down, the key goes down and up, the modifiers go up.
+   */
+  sendChord(mods: number, usage: number): void {
+    const saved: number = this.latched;
+    this.latched = saved | mods;
+    this.held = [];
+    this.held.push(usage);
+    this.sendKeyboard();
+    this.held = [];
+    this.latched = saved;
+    this.sendKeyboard();
+  }
+
+  /**
+   * Move the pointer around a little so that it can be found on a big
+   * screen.
+   */
+  findCursor(): void {
+    const path: number[][] = [
+      [60, 0], [0, 60], [-60, 0], [0, -60], [40, 40], [-40, -40]
+    ];
+    for (let i = 0; i < path.length; i++) {
+      this.mouseMove(path[i][0], path[i][1]);
+    }
+  }
+
+  /**
    * Pair with a device that is not paired yet.  A computer that is not in
    * the paired list can still be used: it has to show up in a scan first.
    */

@@ -15,7 +15,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 
 import { hidDevice } from '../model/Global';
 import { PeerInfo } from '../model/HidDevice';
-import { KeyDef, extraKeys, leftRows, rightRows } from '../model/Keymap';
+import { KeyDef, extraKeys, leftRows, rightRows, shortcutKeys } from '../model/Keymap';
 import { KeyRow } from '../components/KeyRow';
 import { TouchPad } from '../components/TouchPad';
 
@@ -38,6 +38,7 @@ struct Index {
   private left: KeyDef[][] = leftRows();
   private right: KeyDef[][] = rightRows();
   private extra: KeyDef[] = extraKeys();
+  private shortcuts: KeyDef[] = shortcutKeys();
   /** Tries the connection again every few seconds until it works. */
   private retryTimer: number = -1;
   /** Keeps the status line in step with the real link state. */
@@ -164,6 +165,18 @@ struct Index {
     this.picking = false;
     this.status = '已连接：' + hidDevice.peerName();
     this.stopRetry();
+  }
+
+  /** A key from the strips below the keyboard. */
+  private tapExtra(k: KeyDef): void {
+    if (k.consumer) {
+      hidDevice.sendConsumer(k.usage);
+    } else if (k.mods !== 0) {
+      hidDevice.sendChord(k.mods, k.usage);
+    } else {
+      hidDevice.pressKey(k.usage, false);
+      hidDevice.releaseKey(k.usage);
+    }
   }
 
   /** Connect to one of the devices the user picked. */
@@ -318,14 +331,41 @@ struct Index {
             .backgroundColor('#171e25')
             .border({ width: 1, color: '#232d36' })
             .onClick(() => {
-              if (k.consumer) {
-                hidDevice.sendConsumer(k.usage);
-              } else {
-                hidDevice.pressKey(k.usage, false);
-                hidDevice.releaseKey(k.usage);
-              }
+              this.tapExtra(k);
             })
         }, (k: KeyDef) => k.label)
+      }
+      .width('100%')
+      .padding({ left: 6, right: 6, bottom: 4 })
+
+      // ----------------------------------------------------- shortcut keys
+      Row() {
+        ForEach(this.shortcuts, (k: KeyDef) => {
+          Text(k.label)
+            .fontSize(13)
+            .fontColor('#c8d6e2')
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1)
+            .height(34)
+            .borderRadius(8)
+            .backgroundColor('#171e25')
+            .border({ width: 1, color: '#232d36' })
+            .onClick(() => {
+              this.tapExtra(k);
+            })
+        }, (k: KeyDef) => k.label)
+        Text('找鼠标')
+          .fontSize(13)
+          .fontColor('#c8d6e2')
+          .textAlign(TextAlign.Center)
+          .layoutWeight(1)
+          .height(34)
+          .borderRadius(8)
+          .backgroundColor('#171e25')
+          .border({ width: 1, color: '#232d36' })
+          .onClick(() => {
+            hidDevice.findCursor();
+          })
       }
       .width('100%')
       .padding({ left: 6, right: 6, bottom: 6 })
