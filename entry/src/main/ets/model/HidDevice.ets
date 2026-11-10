@@ -9,7 +9,7 @@
  * The whole thing only works while the app is in the foreground: the system
  * cancels the registration as soon as the app goes to the background.
  */
-import { bluetoothManager, common, connection, constant, hid } from '@kit.ConnectivityKit';
+import { baseProfile, bluetoothManager, common, connection, constant, hid } from '@kit.ConnectivityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -104,7 +104,28 @@ export class HidDevice {
 
     return new Promise<boolean>((resolve) => {
       try {
-        profile.registerHidDevice(sdp, {}, {}, (ok: boolean) => {
+        // The QoS of the two channels: the host sends us the LED report,
+        // we send the keyboard and mouse reports.
+        const inQos: hid.HidDeviceQos = {
+          serviceType: hid.ServiceType.SERVICE_BEST_EFFORT,
+          tokenRate: 0,
+          tokenBucketSize: 0,
+          peakBandwidth: 0,
+          latency: -1,
+          delayVariation: -1
+        };
+        const outQos: hid.HidDeviceQos = {
+          serviceType: hid.ServiceType.SERVICE_BEST_EFFORT,
+          tokenRate: 0,
+          tokenBucketSize: 0,
+          peakBandwidth: 0,
+          latency: -1,
+          delayVariation: -1
+        };
+        profile.registerHidDevice(sdp, inQos, outQos, (ok: boolean) => {
+          // The callback reports the registration state: it also fires
+          // with false when the system drops the registration because the
+          // app went to the background.
           this.registered = ok;
           hilog.info(DOMAIN, TAG, 'registerHidDevice: %{public}s', ok ? 'ok' : 'refused');
           if (ok) {
@@ -159,9 +180,14 @@ export class HidDevice {
     const live: string = await this.scanForHost(pc.name, 8000);
     if (live.length > 0 && live !== pc.address) {
       hilog.info(DOMAIN, TAG, 'live address of %{public}s is %{public}s', pc.name, live);
-      return this.connectTo(live);
+      this.connectTo(live);
     }
-    return this.connectTo(pc.address);
+
+    // The paired address is tried as well, with both address types: the
+    // stack may only know the peer under one of them.
+    this.connectToWithType(pc.address, common.BluetoothAddressType.REAL);
+    this.connectToWithType(pc.address, common.BluetoothAddressType.VIRTUAL);
+    return true;
   }
 
   /**
@@ -355,12 +381,21 @@ export class HidDevice {
 
   /** Open the HID channel to one specific device. */
   connectTo(address: string): boolean {
+    return this.connectToWithType(address, common.BluetoothAddressType.REAL);
+  }
+
+  /**
+   * Open the HID channel with an explicit address type.  The paired list
+   * hands out the private address of a peer; depending on how the peer
+   * rotates its address, the stack may only find it under one of them.
+   */
+  connectToWithType(address: string, type: common.BluetoothAddressType): boolean {
     if (!this.profile || !this.registered) {
       return false;
     }
     const target: common.BluetoothAddress = {
       address: address,
-      addressType: common.BluetoothAddressType.REAL
+      addressType: type
     };
     try {
       this.profile.connect(target);
@@ -368,8 +403,8 @@ export class HidDevice {
       // worth trying, the stack drops them until the link is up.
       this.connected = true;
       this.peer = connection.getRemoteDeviceName(address);
-      hilog.info(DOMAIN, TAG, 'connecting to %{public}s (%{public}s)',
-        this.peer, address);
+      hilog.info(DOMAIN, TAG, 'connecting to %{public}s (%{public}s) type %{public}d',
+        this.peer, address, type);
       // An empty keyboard report kicks the connection: it is repeated
       // until the host answers, which is also how we learn that the
       // link is really up.
@@ -413,6 +448,20 @@ export class HidDevice {
     this.profile.onVirtualCableUnplug(() => {
       hilog.info(DOMAIN, TAG, 'host unplugged');
       this.connected = false;
+      this.linkUp = false;
+    });
+    // The state of the profile connection is the only reliable answer to
+    // "did it work?".
+    this.profile.on('connectionStateChange', (param: baseProfile.StateChangeParam) => {
+      hilog.info(DOMAIN, TAG, 'connection state %{public}d for %{public}s cause %{public}d',
+        param.state, param.deviceId, param.cause);
+      if (param.state === constant.ProfileConnectionState.STATE_CONNECTED) {
+        this.connected = true;
+        this.linkUp = true;
+      } else if (param.state === constant.ProfileConnectionState.STATE_DISCONNECTED) {
+        this.connected = false;
+        this.linkUp = false;
+      }
     });
   }
 
