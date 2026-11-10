@@ -28,6 +28,8 @@ struct Index {
   @State status: string = '正在启动…';
   /** True when the HID link is up. */
   @State linked: boolean = false;
+  /** True once the host has accepted a report - the real link state. */
+  @State linkUp: boolean = false;
   /** The paired devices the user can pick from. */
   @State peers: PeerInfo[] = [];
   /** True while the device picker is showing. */
@@ -38,9 +40,20 @@ struct Index {
   private extra: KeyDef[] = extraKeys();
   /** Tries the connection again every few seconds until it works. */
   private retryTimer: number = -1;
+  /** Keeps the status line in step with the real link state. */
+  private heartbeat: number = -1;
 
   aboutToAppear(): void {
     this.start();
+    this.heartbeat = setInterval(() => {
+      const up: boolean = hidDevice.isLinkUp();
+      if (up !== this.linkUp) {
+        this.linkUp = up;
+        if (up) {
+          this.status = '已连接：' + hidDevice.peerName();
+        }
+      }
+    }, 1500);
   }
 
   /**
@@ -55,6 +68,10 @@ struct Index {
 
   onPageHide(): void {
     this.stopRetry();
+    if (this.heartbeat >= 0) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = -1;
+    }
   }
 
   private startRetry(): void {
@@ -92,7 +109,7 @@ struct Index {
     }
 
     this.status = '正在查找电脑…';
-    this.peers = hidDevice.listPeers();
+    await this.refreshPeers();
     if (this.peers.length === 0) {
       this.status = '没有已配对的设备：请先在系统蓝牙里和电脑配对';
       this.picking = true;
@@ -101,6 +118,35 @@ struct Index {
     }
 
     await this.connectOnly();
+  }
+
+  /**
+   * The list the user picks from: the paired devices plus the computers
+   * that show up in a scan but are not paired yet.
+   */
+  private async refreshPeers(): Promise<void> {
+    const paired: PeerInfo[] = hidDevice.listPeers();
+    const scanned: PeerInfo[] = await hidDevice.scanPeers(6000);
+    const merged: PeerInfo[] = [];
+    for (const p of paired) {
+      merged.push(p);
+    }
+    for (const s of scanned) {
+      if (!s.isComputer) {
+        continue;
+      }
+      let known = false;
+      for (const p of paired) {
+        if (p.name === s.name) {
+          known = true;
+          break;
+        }
+      }
+      if (!known) {
+        merged.push(s);
+      }
+    }
+    this.peers = merged;
   }
 
   /** Try to reach the computer; give up to the user if that does not work. */
@@ -120,10 +166,15 @@ struct Index {
     this.stopRetry();
   }
 
-  /** Connect to one of the paired devices the user picked. */
-  private choosePeer(address: string): void {
+  /** Connect to one of the devices the user picked. */
+  private choosePeer(peer: PeerInfo): void {
     this.status = '正在连接…';
-    if (hidDevice.connectTo(address)) {
+    if (!peer.paired) {
+      // A computer that shows up in a scan but was never paired: pair
+      // with it first, then open the HID channel.
+      hidDevice.pairWith(peer.address);
+    }
+    if (hidDevice.connectTo(peer.address)) {
       this.linked = true;
       this.picking = false;
       this.status = '已连接：' + hidDevice.peerName();
@@ -163,7 +214,7 @@ struct Index {
       // ------------------------------------------------------ status line
       Row() {
         Circle({ width: 10, height: 10 })
-          .fill(this.linked ? '#00d060' : '#ff5a5a')
+          .fill(this.linkUp ? '#00d060' : '#ff5a5a')
         Text(this.status)
           .fontSize(12)
           .fontColor('#9fb0c0')
@@ -199,10 +250,10 @@ struct Index {
                 .fontColor('#e8eef4')
                 .layoutWeight(1)
               if (p.isComputer) {
-                Text('电脑')
+                Text(p.paired ? '电脑' : '电脑·未配对')
                   .fontSize(11)
                   .fontColor('#0b0e11')
-                  .backgroundColor('#00d060')
+                  .backgroundColor(p.paired ? '#00d060' : '#3a4a58')
                   .padding({ left: 6, right: 6 })
                   .borderRadius(4)
                   .margin({ right: 8 })
@@ -216,7 +267,7 @@ struct Index {
             .backgroundColor('#171e25')
             .border({ width: 1, color: '#232d36' })
             .onClick(() => {
-              this.choosePeer(p.address);
+              this.choosePeer(p);
             })
           }, (p: PeerInfo) => p.address)
         }

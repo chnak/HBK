@@ -31,6 +31,8 @@ export interface PeerInfo {
   /** True when the device announces itself as a computer - this is the
    *  Bluetooth class of device, which is far more reliable than the name. */
   isComputer: boolean;
+  /** True when the phone is already paired with it. */
+  paired: boolean;
 }
 
 export class HidDevice {
@@ -163,6 +165,66 @@ export class HidDevice {
   }
 
   /**
+   * Scan the neighbourhood and return everything that shows up.  A computer
+   * that is not paired yet can be found here as well.
+   */
+  scanPeers(timeoutMs: number): Promise<PeerInfo[]> {
+    return new Promise<PeerInfo[]>((resolve) => {
+      const found: PeerInfo[] = [];
+      let done: boolean = false;
+      const finish = () => {
+        if (done) {
+          return;
+        }
+        done = true;
+        try {
+          connection.stopBluetoothDiscovery();
+          connection.off('discoveryResult', onFound);
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'stop scan failed: %{public}s', (e as BusinessError).message);
+        }
+        resolve(found);
+      };
+
+      const onFound = (results: Array<connection.DiscoveryResult>) => {
+        for (const r of results) {
+          const isComputer: boolean = !!r.deviceClass
+            && r.deviceClass.majorClass === constant.MajorClass.MAJOR_COMPUTER;
+          hilog.info(DOMAIN, TAG, 'found %{public}s %{public}s computer %{public}s',
+            r.deviceId, r.deviceName, isComputer ? 'yes' : 'no');
+          let known = false;
+          for (const f of found) {
+            if (f.address === r.deviceId) {
+              known = true;
+              break;
+            }
+          }
+          if (!known) {
+            found.push({
+              address: r.deviceId,
+              name: r.deviceName,
+              isComputer: isComputer,
+              paired: false
+            });
+          }
+        }
+      };
+
+      try {
+        connection.on('discoveryResult', onFound);
+        connection.startBluetoothDiscovery();
+      } catch (e) {
+        hilog.error(DOMAIN, TAG, 'scan failed: %{public}s', (e as BusinessError).message);
+        finish();
+        return;
+      }
+      setTimeout(() => {
+        finish();
+      }, timeoutMs);
+    });
+  }
+
+  /**
    * Look for the computer in the Bluetooth scan and return the address it
    * is advertising right now.  An empty string means it was not found.
    */
@@ -185,7 +247,7 @@ export class HidDevice {
 
       const onFound = (results: Array<connection.DiscoveryResult>) => {
         for (const r of results) {
-          const isComputer: boolean = r.deviceClass
+          const isComputer: boolean = !!r.deviceClass
             && r.deviceClass.majorClass === constant.MajorClass.MAJOR_COMPUTER;
           hilog.info(DOMAIN, TAG, 'found %{public}s %{public}s computer %{public}s',
             r.deviceId, r.deviceName, isComputer ? 'yes' : 'no');
@@ -237,7 +299,7 @@ export class HidDevice {
         hilog.warn(DOMAIN, TAG, 'no name for %{public}s', address);
       }
       hilog.info(DOMAIN, TAG, 'paired [%{public}s] %{public}s', address, name);
-      out.push({ address: address, name: name, isComputer: this.isComputer(address) });
+      out.push({ address: address, name: name, isComputer: this.isComputer(address), paired: true });
     }
     return out;
   }

@@ -71,6 +71,8 @@ export struct TouchPad {
         .fontSize(12)
         .fontColor('#5c6b78')
         .margin({ top: 8 })
+        // The label must not swallow the touches - they belong to the pad.
+        .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .height('100%')
