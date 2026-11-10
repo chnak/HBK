@@ -257,7 +257,12 @@ export class HidDevice {
   scanForHost(name: string, timeoutMs: number): Promise<string> {
     return new Promise<string>((resolve) => {
       let done: boolean = false;
-      const finish = (address: string) => {
+      // The computer with the right name wins; only if there is none, any
+      // device that says it is a computer is taken.
+      let byName: string = '';
+      let byClass: string = '';
+
+      const finish = () => {
         if (done) {
           return;
         }
@@ -268,7 +273,7 @@ export class HidDevice {
         } catch (e) {
           hilog.warn(DOMAIN, TAG, 'stop scan failed: %{public}s', (e as BusinessError).message);
         }
-        resolve(address);
+        resolve(byName.length > 0 ? byName : byClass);
       };
 
       const onFound = (results: Array<connection.DiscoveryResult>) => {
@@ -278,12 +283,9 @@ export class HidDevice {
           hilog.info(DOMAIN, TAG, 'found %{public}s %{public}s computer %{public}s',
             r.deviceId, r.deviceName, isComputer ? 'yes' : 'no');
           if (name.length > 0 && r.deviceName === name) {
-            finish(r.deviceId);
-            return;
-          }
-          if (isComputer) {
-            finish(r.deviceId);
-            return;
+            byName = r.deviceId;
+          } else if (isComputer && byClass.length === 0) {
+            byClass = r.deviceId;
           }
         }
       };
@@ -293,11 +295,11 @@ export class HidDevice {
         connection.startBluetoothDiscovery();
       } catch (e) {
         hilog.error(DOMAIN, TAG, 'scan failed: %{public}s', (e as BusinessError).message);
-        finish('');
+        finish();
         return;
       }
       setTimeout(() => {
-        finish('');
+        finish();
       }, timeoutMs);
     });
   }
