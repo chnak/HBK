@@ -1,0 +1,19 @@
+# build output
+build/
+.hvigor/
+oh_modules/
+entry/build/
+entry/oh_modules/
+*.hap
+
+# IDE
+.idea/
+.vscode/
+local.properties
+.huawei/
+
+# signing material never belongs in the repository
+*.p12
+*.cer
+*.p7b
+*.csr

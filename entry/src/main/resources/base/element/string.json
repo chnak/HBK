@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "把手机变成电脑的蓝牙键盘和鼠标"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "HBK 键鼠"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "HBK 键鼠"
+    },
+    {
+      "name": "reason_bluetooth",
+      "value": "需要蓝牙把键盘和鼠标的输入发送给电脑"
+    }
+  ]
+}
