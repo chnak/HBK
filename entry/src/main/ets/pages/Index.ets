@@ -167,6 +167,24 @@ struct Index {
     this.stopRetry();
   }
 
+  /**
+   * The address in the paired list can go stale - Windows rotates it - and
+   * then the connection request times out.  Pairing again fixes the record
+   * on both sides; the computer may ask for a confirmation.
+   */
+  private async repairPairing(): Promise<void> {
+    this.status = '正在重新配对，请在电脑上确认…';
+    for (const p of this.peers) {
+      if (p.isComputer) {
+        await hidDevice.refreshPairing(p.address);
+      }
+    }
+    this.status = '重新配对后正在重连…';
+    setTimeout(() => {
+      this.connectOnly();
+    }, 5000);
+  }
+
   /** A key from the strips below the keyboard. */
   private tapExtra(k: KeyDef): void {
     if (k.consumer) {
@@ -242,6 +260,16 @@ struct Index {
           .fontColor('#c8d6e2')
           .onClick(() => {
             this.reconnect();
+          })
+        Button('重新配对')
+          .fontSize(12)
+          .height(26)
+          .padding({ left: 10, right: 10 })
+          .margin({ left: 6 })
+          .backgroundColor('#1b242e')
+          .fontColor('#c8d6e2')
+          .onClick(() => {
+            this.repairPairing();
           })
       }
       .width('100%')

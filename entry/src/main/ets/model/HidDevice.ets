@@ -191,6 +191,24 @@ export class HidDevice {
   }
 
   /**
+   * Pair with the computer again.  When the address in the paired list has
+   * gone stale, a fresh pairing makes both sides talk again - and the
+   * computer may ask for a confirmation, which the user has to accept.
+   */
+  async refreshPairing(address: string): Promise<boolean> {
+    hilog.info(DOMAIN, TAG, 'pairing again with %{public}s', address);
+    return new Promise<boolean>((resolve) => {
+      try {
+        connection.pairDevice(address);
+        resolve(true);
+      } catch (e) {
+        hilog.error(DOMAIN, TAG, 'pairDevice failed: %{public}s', (e as BusinessError).message);
+        resolve(false);
+      }
+    });
+  }
+
+  /**
    * Scan the neighbourhood and return everything that shows up.  A computer
    * that is not paired yet can be found here as well.
    */
