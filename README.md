@@ -75,9 +75,12 @@ Bluetooth HID Device，PC 扮演 HID Host，键盘和触控板的输入都转成
 一条命令：编译 → 签名 → 安装 → 启动。
 
 ```powershell
-.\install.ps1                       # 默认设备 192.168.50.22:37793
-.\install.ps1 -Device 192.168.1.50:5555
+.\install.ps1                       # 自动找手机：先看 hdc 已连上的，再扫本机网段
+.\install.ps1 -Device 192.168.50.22:37793
 ```
+
+手机上的无线调试地址在「开发者选项 → 无线调试 → IP 地址和端口」里看。
+插 USB 线的话 hdc 会自己认出来。
 
 签名用的是华为云签发的调试证书（`hap_installer` 已经存了一份）：
 
